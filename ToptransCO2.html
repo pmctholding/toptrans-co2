@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOPTRANS - CO2 Kalkulačka & Certifikát</title>
+    <!-- Tailwind CSS pro UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- html2canvas a jsPDF pro generování PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
+        :root {
+            --toptrans-blue: #004B93;
+            --toptrans-red: #E30613;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .bg-toptrans-blue { background-color: var(--toptrans-blue); }
+        .text-toptrans-blue { color: var(--toptrans-blue); }
+        .border-toptrans-blue { border-color: var(--toptrans-blue); }
+        .text-toptrans-red { color: var(--toptrans-red); }
+
+        /* A4 Landscape Ratio (1123x794 při 96 DPI) */
+        #certificate-container {
+            width: 1123px;
+            height: 794px;
+            background: white;
+            padding: 45px 70px 120px 70px; 
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            color: #1a202c;
+            box-sizing: border-box;
+        }
+
+        .preview-wrapper {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            overflow: auto;
+            background: #cbd5e1;
+            padding: 2rem;
+            border-radius: 1rem;
+        }
+
+        .preview-scale {
+            transform: scale(0.5);
+            transform-origin: top center;
+        }
+        @media (min-width: 1024px) { .preview-scale { transform: scale(0.65); } }
+        @media (min-width: 1440px) { .preview-scale { transform: scale(0.8); } }
+
+        .metric-card {
+            background: white;
+            border-radius: 12px;
+            padding: 12px 10px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            border: 1px solid #f0f0f0;
+            text-align: center;
+            flex: 1;
+            min-width: 125px;
+            height: 105px; 
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+
+        #status-message {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 12px;
+            background: #1e293b;
+            color: white;
+            font-weight: 600;
+            display: none;
+            z-index: 2000;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Skrytý kontejner pro čistý export */
+        #capture-temp-container {
+            position: absolute;
+            left: -9999px;
+            top: 0;
+            width: 1123px;
+            height: 794px;
+            background: white;
+        }
+
+        .logo-footer-box {
+            height: 60px;
+            width: 250px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-10">
+
+    <div class="max-w-7xl mx-auto flex flex-col lg:flex-row gap-10">
+        
+        <!-- FORMULÁŘ -->
+        <div class="w-full lg:w-1/3 bg-white rounded-3xl shadow-2xl p-8 h-fit border border-gray-100">
+            <div class="flex items-center gap-5 mb-8">
+                <div class="bg-white p-2 rounded-xl shadow-sm border border-gray-100 text-3xl">🌿</div>
+                <div>
+                    <h1 class="text-2xl font-black text-toptrans-blue leading-none uppercase">CO2</h1>
+                    <p class="text-sm font-bold text-toptrans-red uppercase">KALKULÁTOR</p>
+                </div>
+            </div>
+
+            <div class="space-y-5">
+                <div>
+                    <label class="block text-[11px] font-black text-gray-400 uppercase mb-1 tracking-widest">Název zákazníka</label>
+                    <input type="text" id="inputCustomer" class="w-full border-2 border-gray-100 bg-gray-50 p-3 rounded-xl focus:bg-white focus:border-toptrans-blue outline-none transition-all font-semibold" placeholder="Např. PMCT Holding s.r.o.">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-black text-gray-400 uppercase mb-1 tracking-widest">Období (např. rok 2025)</label>
+                    <input type="text" id="inputPeriod" class="w-full border-2 border-gray-100 bg-gray-50 p-3 rounded-xl focus:bg-white focus:border-toptrans-blue outline-none transition-all font-semibold" placeholder="rok 2025">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="flex flex-col">
+                        <label class="block text-[11px] font-black text-gray-400 uppercase mb-1 tracking-widest h-8 flex items-end">Počet zásilek *</label>
+                        <input type="number" id="inputShipments" min="0" oninput="this.value = Math.max(0, this.value)" class="w-full border-2 border-gray-100 bg-gray-50 p-3 rounded-xl focus:bg-white focus:border-toptrans-blue outline-none transition-all font-semibold" placeholder="0">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="block text-[11px] font-black text-gray-400 uppercase mb-1 tracking-widest h-8 flex items-end">Vzdálenost (km) *</label>
+                        <input type="number" id="inputDistance" min="0" oninput="this.value = Math.max(0, this.value)" class="w-full border-2 border-gray-100 bg-gray-50 p-3 rounded-xl focus:bg-white focus:border-toptrans-blue outline-none transition-all font-semibold" placeholder="0">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-black text-gray-400 uppercase mb-1 tracking-widest">Hmotnost nákladu (kg) *</label>
+                    <input type="number" id="inputWeight" min="0" oninput="this.value = Math.max(0, this.value)" class="w-full border-2 border-gray-100 bg-gray-50 p-3 rounded-xl focus:bg-white focus:border-toptrans-blue outline-none transition-all font-semibold" placeholder="0">
+                </div>
+                <p class="text-[10px] text-gray-400 italic font-medium pt-1">* Hodnoty musí být kladné</p>
+            </div>
+
+            <button id="downloadBtn" onclick="generatePDF()" class="w-full mt-8 bg-toptrans-blue hover:bg-slate-800 text-white font-black py-4 px-6 rounded-2xl transition-all shadow-xl active:scale-95 uppercase text-xs tracking-widest">
+                Stáhnout certifikát
+            </button>
+        </div>
+
+        <!-- NÁHLED -->
+        <div class="w-full lg:w-2/3 flex flex-col">
+            <div class="flex items-center justify-between mb-4 px-4">
+                <h2 class="text-slate-400 font-black uppercase text-xs tracking-[0.3em] flex items-center gap-3">
+                    <span class="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    Náhled Certifikátu
+                </h2>
+                <span class="text-[10px] font-bold text-slate-300 uppercase">A4 Landscape</span>
+            </div>
+            
+            <div class="preview-wrapper shadow-inner bg-slate-200">
+                <div class="preview-scale">
+                    <div id="certificate-container">
+                        
+                        <!-- Hlavička -->
+                        <div class="relative z-10 mb-4">
+                            <h1 class="text-[#003366] text-[42px] font-[900] leading-tight uppercase">
+                                CERTIFIKÁT UDRŽITELNÉ LOGISTIKY
+                            </h1>
+                            <h2 class="text-[#1a202c] text-xl font-bold mt-1">
+                                Potvrzení o uhlíkové stopě přepravních služeb
+                            </h2>
+                            <p class="text-gray-700 text-lg mt-5 leading-relaxed max-w-[1020px]">
+                                Tento certifikát potvrzuje, že společnost <span class="font-bold text-black">TOPTRANS EU, a.s.</span> v rámci strategického partnerství se společností <span id="viewCustomer" class="font-bold text-black">PMCT Holding s.r.o.</span>, provedla analýzu a výpočet emisí skleníkových plynů spojených s realizovanou přepravou za <span id="viewPeriod" class="font-bold text-black">rok 2025</span>.
+                            </p>
+                        </div>
+
+                        <!-- Hlavní obsah -->
+                        <div class="flex gap-10 relative z-10 flex-grow pt-4">
+                            
+                            <div class="w-[430px] flex flex-col">
+                                <!-- Modrá dlaždice -->
+                                <div class="bg-toptrans-blue text-white p-8 rounded-xl shadow-lg border-b-4 border-black/20 flex flex-col h-[285px] mb-6">
+                                    <!-- Horní část (Jméno) -->
+                                    <div class="text-center h-[50px] mb-4">
+                                        <div class="text-[13px] font-medium leading-tight opacity-90 mb-1 uppercase tracking-wider">
+                                            Celková uhlíková stopa pro společnost
+                                        </div>
+                                        <div id="viewCustomerResult" class="font-black leading-tight break-words text-2xl px-2">
+                                            PMCT Holding s.r.o.
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Střední část (Hodnota CO2) - V náhledu posunuta níž -->
+                                    <div id="co2-value-box" class="flex-grow flex flex-col justify-center items-center mt-0 transition-all">
+                                        <div class="flex items-baseline justify-center gap-3 w-full mb-14">
+                                            <span id="viewCO2" style="font-weight: 900; line-height: 1.1; font-size: 5rem;">---</span>
+                                            <span id="viewCO2Unit" class="text-3xl font-bold italic shrink-0 ml-4">t CO<sub>2</sub>e</span>
+                                        </div>
+                                        <!-- Období TUČNĚ -->
+                                        <div class="text-[14px] font-black uppercase whitespace-nowrap opacity-100">
+                                            za období: <span id="viewPeriodResult">rok 2025</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Rezerva vespod boxu -->
+                                    <div class="h-[15px]"></div>
+                                </div>
+
+                                <!-- Parametry -->
+                                <div class="flex gap-3 mt-auto mb-10">
+                                    <div class="metric-card">
+                                        <div class="metric-val-container h-12 flex items-center justify-center">
+                                            <div id="boxShipments" class="font-black text-gray-900 leading-none text-3xl"><span id="viewShipments">0</span> <span class="text-xs font-bold text-gray-400">ks</span></div>
+                                        </div>
+                                        <div class="flex-grow flex items-start justify-center text-[9px] text-gray-500 font-bold uppercase leading-tight text-center px-1">Počet doručených zásilek</div>
+                                    </div>
+                                    <div class="metric-card">
+                                        <div class="metric-val-container h-12 flex items-center justify-center">
+                                            <div id="boxDistance" class="font-black text-gray-900 leading-none text-3xl"><span id="viewDistance">0</span> <span class="text-xs font-bold text-gray-400">km</span></div>
+                                        </div>
+                                        <div class="flex-grow flex items-start justify-center text-[9px] text-gray-500 font-bold uppercase leading-tight text-center px-1">Celková přepravní vzdálenost</div>
+                                    </div>
+                                    <div class="metric-card">
+                                        <div class="metric-val-container h-12 flex items-center justify-center">
+                                            <div id="boxWeight" class="font-black text-gray-900 leading-none text-3xl"><span id="viewWeight">0</span> <span class="text-xs font-bold text-gray-400">kg</span></div>
+                                        </div>
+                                        <div class="flex-grow flex items-start justify-center text-[9px] text-gray-500 font-bold uppercase leading-tight text-center px-1">Celková hmotnost nákladu</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Pravý sloupec: Metodika (AKTUALIZOVÁNA) -->
+                            <div class="flex-grow flex flex-col pl-4">
+                                <h3 class="text-[16px] font-black text-gray-900 uppercase mb-1 pb-1 tracking-tight">ODŮVODNĚNÍ A POUŽITÁ METODIKA</h3>
+                                <p class="text-[13px] text-gray-800 font-medium mb-3 border-b border-gray-100 pb-2 leading-snug">Výpočet byl realizován na základě certifikované metodiky, která splňuje nejpřísnější mezinárodní standardy pro reporting udržitelnosti:</p>
+                                <ul class="methodology-list text-[11.2px] text-gray-700 space-y-2 mb-auto leading-tight">
+                                    <li><span class="font-bold text-gray-900">Standard GHG Protocol:</span> Výpočet následuje GHG Protocol Corporate Accounting and Reporting Standard.</li>
+                                    <li><span class="font-bold text-gray-900">Rozsah analýzy (Scopes):</span> Hodnota zahrnuje přímé emise z vozového parku (Scope 1), nepřímé emise z nakoupených energií (Scope 2) a emise v celém dodavatelském řetězci (Scope 3).</li>
+                                    <li><span class="font-bold text-gray-900">Komplexní stopa (Scope 3):</span> Vykázané emise reflektují nejen samotnou dopravu, ale i zakoupené zboží a služby, distribuci, odpady z provozu a dojíždění zaměstnanců.</li>
+                                    <li><span class="font-bold text-gray-900">Auditovaná data:</span> Výpočet vychází z emisních faktorů validovaných pro síť TOPTRANS, kde emise Scope 3 tvoří 91 % celkové stopy, což dokládá hloubku a transparentnost provedené analýzy.</li>
+                                    <li><span class="font-bold text-gray-900">Uvedené období:</span> Výpočet pro uvedené období předpokládá stejné provozní hranice a emisní intenzitu na zásilku jako v roce 2025 s možnou odchylkou ± 20 %.</li>
+                                </ul>
+
+                                <div class="mt-auto mb-10 p-4 bg-gray-50 border-l-4 border-toptrans-blue rounded-r-lg shadow-sm h-[100px] flex flex-col justify-center">
+                                    <p class="text-[11.5px] text-gray-600 leading-relaxed italic">
+                                        <span class="font-bold not-italic text-toptrans-blue uppercase block mb-1">Ověřitelnost dat</span> 
+                                        Výpočet vychází z metodické zprávy o uhlíkové stopě TOPTRANS EU, a.s., registrované pod č. <span class="font-bold text-gray-800">GHG-2026_10010</span> vypracované společností <span class="font-bold text-gray-800">DATACARBON s.r.o.</span>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Patička -->
+                        <div class="absolute bottom-11 left-[65px] right-[65px] z-20 pt-5 flex items-end justify-between">
+                            <!-- Logo s transformací pro posun DOLŮ v náhledu -->
+                            <div class="logo-footer-box transform translate-y-5">
+                                <svg width="235" height="52" viewBox="0 0 235 52" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#clip0_358_14055)"><mask id="mask0_358_14055" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="0" y="0" width="235" height="52"><path d="M234.928 0.994873H0V51.9949H234.928V0.994873Z" fill="white"/></mask><g mask="url(#mask0_358_14055)"><path d="M35.3034 11.0581C35.2487 11.2222 34.7565 12.2066 33.5532 12.234C32.4321 12.234 32.5961 11.1948 32.8149 10.3197C33.2251 8.21412 33.6353 5.56157 32.0766 4.08489L32.9243 1.7605H38.7216L35.3034 11.0581ZM21.2476 1.7605H31.1195L21.7672 27.1921C21.2203 28.6688 21.0835 28.9149 22.3414 29.3525C22.8063 29.5165 23.0251 29.872 22.8337 30.4189C22.3961 31.5675 21.0562 31.6495 20.8921 31.6495H9.46155C9.29747 31.6495 8.01222 31.5675 8.42241 30.4189C8.64117 29.872 9.1334 29.4892 9.70766 29.3251C11.2664 28.8876 11.3211 28.6415 11.868 27.1648L21.2476 1.7605ZM13.6181 1.7605H19.4154L18.5677 4.08489C15.9152 5.56157 14.3838 8.21412 13.2626 10.3197C12.8251 11.1948 12.2235 12.234 11.1023 12.234C9.89908 12.234 10.1452 11.2495 10.1999 11.0854L13.6181 1.7605Z" fill="#005DAA"/><path d="M44.1087 29.9268C46.2417 29.2431 46.8433 28.0399 47.2261 27.0555L54.8556 6.35465C55.2111 5.34285 55.5119 4.16698 53.8438 3.48333L54.6915 1.15894C62.95 1.92462 64.4267 8.73374 61.5007 16.7187C58.5746 24.6764 52.0663 31.5128 43.2336 32.2785L44.0814 29.9541L44.1087 29.9268ZM52.0116 3.45599C49.8787 4.13964 49.2497 5.34285 48.8942 6.3273L41.2921 27.0281C40.9366 28.0399 40.6358 29.2158 42.3039 29.8994L41.4562 32.2238C33.1977 31.4581 31.721 24.6217 34.647 16.664C37.5457 8.73374 44.054 1.89728 52.8867 1.13159L52.039 3.45599H52.0116Z" fill="#005DAA"/><path d="M83.5141 1.70581C87.3425 1.70581 89.4482 2.08865 90.9522 3.18249C93.2766 4.93262 93.4954 7.58517 92.2648 10.9487C91.0342 14.3122 88.9013 16.9374 85.2643 18.7149C82.9672 19.7814 80.5608 20.1916 76.7324 20.1916L77.5801 17.8672C80.1232 17.4297 80.8342 15.7889 81.5726 13.82L83.7876 7.77659C84.4439 5.97176 84.69 4.33101 82.6664 4.03021L83.5141 1.70581ZM70.1694 6.19053C70.7163 4.71385 70.853 4.46774 69.5951 4.03021C69.1302 3.86613 68.8841 3.51064 69.1029 2.93637C69.5404 1.78785 70.8803 1.70581 71.0444 1.70581H81.682L72.3297 27.1374C71.7828 28.6141 71.646 28.8602 72.9039 29.2978C73.3688 29.4618 73.5876 29.8173 73.3962 30.3643C72.9586 31.5128 71.6187 31.5128 71.4546 31.5128H60.0514C59.8873 31.5128 58.6021 31.5128 59.0123 30.3643C59.2037 29.8173 59.7232 29.4345 60.2975 29.2978C61.8836 28.8602 61.9109 28.6141 62.4578 27.1374L70.1694 6.19053Z" fill="#005DAA"/><path d="M118.9 11.0034C118.845 11.1675 118.353 12.1519 117.149 12.1793C116.028 12.1793 116.192 11.1401 116.411 10.2651C116.821 8.15943 117.231 5.50689 115.673 4.03021L116.52 1.70581H122.318L118.9 11.0307V11.0034ZM104.816 1.67847H114.688L105.336 27.1101C104.789 28.5868 104.652 28.8329 105.91 29.2704C106.375 29.4345 106.621 29.79 106.403 30.3369C105.965 31.4854 104.625 31.5675 104.461 31.5675H93.0577C92.8937 31.5675 91.6084 31.4854 92.0186 30.3369C92.2374 29.79 92.7296 29.4072 93.3038 29.2431C94.8899 28.8055 94.9173 28.5594 95.4642 27.0828L104.816 1.67847ZM97.187 1.67847H102.984L102.137 4.00286C99.484 5.47954 97.9526 8.13209 96.8315 10.2377C96.3939 11.1128 95.7923 12.1519 94.6711 12.1519C93.4679 12.1519 93.714 11.1675 93.7687 11.0034L97.187 1.67847Z" fill="#005DAA"/><path d="M138.753 1.65118H138.944C141.569 1.65118 144.331 1.56915 146.327 2.71767C148.542 4.03027 149.117 6.24529 148.023 9.28067C146.41 13.8748 142.608 15.871 138.151 16.8555V16.9375C141.515 17.4571 144.577 18.4962 143.101 22.7348L141.815 26.2624C141.679 26.6179 141.268 27.411 141.815 27.411C142.472 27.411 142.991 26.2624 143.976 26.2624C144.495 26.2624 144.933 26.864 144.714 27.411C144.277 28.5595 142.417 30.0635 141.268 30.7198C139.491 31.841 137.905 32.1691 136.182 32.1691C134.459 32.1691 133.037 31.7316 132.244 30.501C131.369 29.0517 131.807 27.3016 132.49 25.4147L133.475 22.7075C134.159 20.8753 134.924 18.633 132.6 18.3868L133.475 16.0351C135.717 15.8437 136.483 14.5037 137.221 12.5622L138.999 7.72196C139.737 5.72571 139.655 4.76861 137.878 4.05762L138.753 1.70588V1.65118ZM125.408 6.1359C125.955 4.65923 126.064 4.41311 124.834 3.97558C124.369 3.81151 124.15 3.45601 124.341 2.88175C124.779 1.73322 126.119 1.65118 126.283 1.65118H136.92L127.568 27.0828C127.021 28.5595 126.885 28.8056 128.142 29.2431C128.607 29.4072 128.826 29.7627 128.635 30.3096C128.197 31.4582 126.857 31.5402 126.693 31.5402H115.29C115.29 31.5402 113.841 31.4582 114.251 30.3096C114.47 29.7627 114.962 29.3799 115.536 29.2431C117.122 28.8056 117.149 28.5595 117.696 27.0828L125.408 6.1359Z" fill="#005DAA"/><path d="M160.547 23.8013H154.668L156.09 21.4769H161.012L163.446 3.81144L164.759 1.65112H173.673L170.419 26.9187C170.255 28.0399 170.009 28.8056 170.966 29.2704C171.431 29.5165 171.787 29.79 171.513 30.501C171.103 31.5675 169.681 31.5401 168.915 31.5401H158.879C158.086 31.5401 156.938 31.4581 157.321 30.419C157.567 29.7627 157.868 29.5712 158.496 29.2978C159.754 28.6962 160.028 28.4227 160.247 26.864L160.575 23.8013H160.547ZM160.657 11.7691L151.824 25.442C150.293 27.8758 150.594 28.5594 151.742 29.161C152.289 29.4345 152.754 29.6806 152.453 30.4736C152.043 31.5948 150.758 31.5401 149.965 31.5401H145.316C144.495 31.5401 143.073 31.5128 143.511 30.3369C143.866 29.3798 144.55 29.4072 145.589 28.9696C146.601 28.5321 148.023 27.6023 149.828 24.7584L161.122 7.20233H161.231L160.629 11.7144L160.657 11.7691Z" fill="#005DAA"/><path d="M202.715 8.84308C204.82 3.1278 200.964 4.65917 201.621 2.79965C202.031 1.67847 203.398 1.59644 203.808 1.59644H209.305C209.715 1.59644 211 1.67847 210.59 2.79965C209.907 4.63182 207.172 3.1278 205.066 8.84308L201.484 18.5509H201.402L200.636 14.5037L202.715 8.81574V8.84308ZM200.281 21.8324L196.726 31.5128H190.71L185.241 6.29992C185.022 5.17874 185.022 4.57713 183.846 4.1396C183.244 3.89349 182.779 3.72941 183.108 2.85434C183.545 1.65113 184.748 1.65113 185.623 1.62378H195.987L200.281 21.8324ZM183.955 9.14389H184.037L184.83 13.1364L180.4 25.2232C179.197 30.2275 182.369 28.6688 181.74 30.3916C181.275 31.6222 179.662 31.5401 179.224 31.5401H174.63C174.193 31.5401 172.497 31.6222 172.962 30.3916C173.591 28.6688 175.615 30.2275 178.076 25.2232L183.983 9.14389H183.955Z" fill="#005DAA"/><path d="M232.166 9.63616C231.838 10.5659 231.291 11.5504 230.115 11.5504C229.158 11.5504 229.049 10.7847 229.24 9.99166C229.897 7.0383 228.502 4.00292 225.603 3.31927L226.451 0.994873C228.967 1.02222 231.127 2.55359 231.565 2.55359C232.604 2.55359 233.069 1.10426 234.108 1.10426C235.366 1.10426 234.764 2.47155 234.655 2.77235L232.139 9.60881L232.166 9.63616ZM206.379 22.5707C206.68 21.723 207.254 20.6018 208.403 20.6018C209.196 20.6018 209.551 21.2308 209.415 21.9144C208.813 25.1139 209.606 29.0791 212.887 29.79L212.04 32.1144C208.567 32.0324 208.321 30.6378 206.844 30.6378C205.559 30.6378 205.203 31.9504 204.191 31.9504C202.934 31.9504 203.48 30.4737 203.563 30.2823L206.406 22.5707H206.379ZM223.826 3.31927C222.103 3.83884 220.353 4.96002 219.751 6.60077C219.04 8.56967 219.669 9.74554 223.798 11.6051C229.924 14.3123 230.17 18.086 228.803 21.7504C226.533 27.9579 219.833 32.0051 213.817 32.1144L214.665 29.79C216.825 29.1884 218.794 28.3134 219.697 26.0984C220.708 23.5825 218.111 22.5434 216.47 21.6957C212.176 19.59 208.293 17.293 210.59 11.0308C212.833 4.96002 218.657 1.21364 224.646 0.994873L223.798 3.31927H223.826Z" fill="#005DAA"/></g><path d="M4.70353 39.0876L2.62524 44.7756H229.24L231.291 39.0876H4.70353Z" fill="#EE3124"/><path d="M2.21501 45.9514L0 51.9948H226.67L228.83 45.9241L2.21501 45.9514Z" fill="#005DAA"/></g><defs><clipPath id="clip0_358_14055"><rect width="234.928" height="51" fill="white" transform="translate(0 0.994873)"/></clipPath></defs></svg>
+                            </div>
+                            <div class="text-right text-[13px] text-gray-400 font-bold uppercase">
+                                TOPTRANS EU, a.s. | Vydáno dne: <span id="viewDate" class="text-gray-900 font-bold">16. 4. 2026</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skrytý kontejner pro čistý export -->
+    <div id="status-message">Generuji certifikát (1:1)...</div>
+    <div id="capture-temp-container" style="position: absolute; left: -9999px; top: 0; width: 1123px; height: 794px; background: white;"></div>
+
+    <script>
+        const CO2_COEFFICIENT = 4783.25;
+
+        const inputs = {
+            customer: document.getElementById('inputCustomer'),
+            period: document.getElementById('inputPeriod'),
+            shipments: document.getElementById('inputShipments'),
+            distance: document.getElementById('inputDistance'),
+            weight: document.getElementById('inputWeight')
+        };
+
+        const views = {
+            customer: document.getElementById('viewCustomer'),
+            customerResult: document.getElementById('viewCustomerResult'),
+            period: document.getElementById('viewPeriod'),
+            periodResult: document.getElementById('viewPeriodResult'),
+            shipments: document.getElementById('viewShipments'),
+            distance: document.getElementById('viewDistance'),
+            weight: document.getElementById('viewWeight'),
+            co2: document.getElementById('viewCO2'),
+            date: document.getElementById('viewDate'),
+            boxShipments: document.getElementById('boxShipments'),
+            boxDistance: document.getElementById('boxDistance'),
+            boxWeight: document.getElementById('boxWeight')
+        };
+
+        const now = new Date();
+        views.date.textContent = now.toLocaleDateString('cs-CZ');
+
+        function updatePreview() {
+            const customer = inputs.customer.value || "PMCT Holding s.r.o.";
+            const period = inputs.period.value || "rok 2025";
+            const shipments = parseFloat(inputs.shipments.value) || 0;
+            const distance = parseFloat(inputs.distance.value) || 0;
+            const weight = parseFloat(inputs.weight.value) || 0;
+
+            if (shipments > 0 && distance > 0 && weight > 0) {
+                const totalCO2Tons = (shipments * CO2_COEFFICIENT) / 1000000;
+                const co2Str = totalCO2Tons.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                views.co2.textContent = co2Str;
+                
+                // Dynamické škálování CO2
+                if (co2Str.length > 7) views.co2.style.fontSize = '2.8rem';
+                else if (co2Str.length > 5) views.co2.style.fontSize = '3.5rem';
+                else views.co2.style.fontSize = '4.5rem';
+            } else {
+                views.co2.textContent = "---";
+                views.co2.style.fontSize = '4.5rem';
+            }
+
+            views.customer.textContent = customer;
+            views.customerResult.textContent = customer;
+            views.customerResult.style.fontSize = customer.length > 25 ? '1.25rem' : '1.5rem';
+
+            views.period.textContent = period;
+            views.periodResult.textContent = period;
+            
+            const sVal = shipments.toLocaleString('cs-CZ');
+            const dVal = distance.toLocaleString('cs-CZ');
+            const wVal = weight.toLocaleString('cs-CZ');
+
+            views.shipments.textContent = sVal;
+            views.distance.textContent = dVal;
+            views.weight.textContent = wVal;
+
+            const maxLength = Math.max(sVal.length, dVal.length, wVal.length);
+            let fontSize = '1.875rem';
+            if (maxLength > 8) fontSize = '1.125rem';
+            else if (maxLength > 6) fontSize = '1.25rem';
+            else if (maxLength >= 5) fontSize = '1.5rem';
+
+            [views.boxShipments, views.boxDistance, views.boxWeight].forEach(el => el.style.fontSize = fontSize);
+        }
+
+        Object.values(inputs).forEach(input => input.addEventListener('input', updatePreview));
+
+        async function generatePDF() {
+            const btn = document.getElementById('downloadBtn');
+            const status = document.getElementById('status-message');
+            const original = document.getElementById('certificate-container');
+            const tempContainer = document.getElementById('capture-temp-container');
+            
+            btn.disabled = true;
+            status.style.display = 'block';
+
+            try {
+                // Vyčištění a vytvoření klonu v absolutním měřítku
+                tempContainer.innerHTML = '';
+                const clone = original.cloneNode(true);
+                
+                // OPRAVA PDF: Vynucení horní pozice čísla CO2 pro export a přidání pevné mezery před jednotku
+                const co2Box = clone.querySelector('#co2-value-box');
+                if (co2Box) {
+                    co2Box.style.marginTop = '-40px'; 
+                }
+
+                const unitSpan = clone.querySelector('#viewCO2Unit');
+                if (unitSpan) {
+                    unitSpan.style.marginLeft = '20px'; 
+                }
+
+                // OPRAVA PDF: Posun hodnot v dolních kartách NAHORU (změna align-items a paddingTop pro export)
+                const metricContainers = clone.querySelectorAll('.metric-val-container');
+                metricContainers.forEach(container => {
+                    container.style.height = '65px'; // Zvětšeno
+                    container.style.display = 'flex';
+                    container.style.alignItems = 'flex-start'; // Zarovnat k hornímu okraji
+                    container.style.paddingTop = '5px'; // Jemné odsazení od horní hrany karty
+                    container.style.marginBottom = '-5px';
+                });
+
+                // OPRAVA PDF: Zrušení transformace loga pro tisk
+                const logoBox = clone.querySelector('.logo-footer-box');
+                if (logoBox) {
+                    logoBox.style.transform = 'none';
+                    logoBox.style.marginTop = '0px';
+                }
+
+                // Odstranění všech tracking a spacing stylů, které engine v PDF rozhazují
+                clone.querySelectorAll('*').forEach(el => {
+                    el.style.letterSpacing = 'normal';
+                    el.style.wordSpacing = 'normal';
+                    el.style.fontVariantNumeric = 'tabular-nums';
+                    el.style.textRendering = 'geometricPrecision';
+                    
+                    if (el instanceof HTMLElement && el.classList) {
+                        const trackingClasses = Array.from(el.classList).filter(c => c.startsWith('tracking-'));
+                        trackingClasses.forEach(c => el.classList.remove(c));
+                        if (el.classList.contains('leading-none')) {
+                            el.style.lineHeight = '1.2';
+                        }
+                    }
+                });
+
+                // Vynucení statického rozvržení bez transformací v exportní zóně
+                clone.style.width = '1123px';
+                clone.style.height = '794px';
+                clone.style.position = 'static';
+                clone.style.transform = 'none';
+
+                tempContainer.appendChild(clone);
+
+                // Počkat na stabilitu fontů v DOM
+                await new Promise(r => setTimeout(r, 1200));
+
+                const canvas = await html2canvas(clone, {
+                    scale: 3, 
+                    useCORS: true,
+                    backgroundColor: '#ffffff',
+                    width: 1123,
+                    height: 794,
+                    logging: false,
+                    windowWidth: 1123,
+                    windowHeight: 794
+                });
+
+                // Export do JPEG 0.8 pro malé a ostré PDF
+                const imgData = canvas.toDataURL('image/jpeg', 0.8);
+                const { jsPDF } = window.jspdf;
+                
+                const pdf = new jsPDF({
+                    orientation: 'landscape',
+                    unit: 'mm',
+                    format: 'a4',
+                    compress: true
+                });
+
+                pdf.addImage(imgData, 'JPEG', 0, 0, 297, 210, undefined, 'MEDIUM');
+                
+                const safeName = (inputs.customer.value || 'vypocet').replace(/[^a-z0-9]/gi, '_');
+                pdf.save(`Certifikat_CO2_TOPTRANS_${safeName}.pdf`);
+                
+            } catch (error) {
+                console.error("Chyba při generování:", error);
+            } finally {
+                tempContainer.innerHTML = '';
+                btn.disabled = false;
+                status.style.display = 'none';
+            }
+        }
+
+        updatePreview();
+    </script>
+</body>
+</html>
